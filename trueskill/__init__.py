@@ -14,6 +14,7 @@ from __future__ import absolute_import
 from itertools import chain
 import math
 
+from copy import deepcopy
 from six import iteritems
 from six.moves import map, range, zip
 
@@ -430,7 +431,7 @@ class TrueSkill(object):
             f.up()
         return layers
 
-    def rate(self, rating_groups, ranks=None, weights=None, min_delta=DELTA):
+    def rate(self, rating_groups, ranks=None, weights=None, min_delta=DELTA, partial_weights=None):
         """Recalculates ratings by the ranking table::
 
            env = TrueSkill()  # uses default settings
@@ -474,6 +475,7 @@ class TrueSkill(object):
         .. versionadded:: 0.2
 
         """
+
         rating_groups, keys = self.validate_rating_groups(rating_groups)
         weights = self.validate_weights(weights, rating_groups, keys)
         group_size = len(rating_groups)
@@ -509,8 +511,10 @@ class TrueSkill(object):
                            key=by_hint)
         if keys is None:
             return [g for x, g in unsorting]
+
         # restore the structure with input dictionary keys
         return [dict(zip(keys[x], g)) for x, g in unsorting]
+
 
     def quality(self, rating_groups, weights=None):
         """Calculates the match quality of the given rating groups.  A result
@@ -691,13 +695,28 @@ def setup(mu=MU, sigma=SIGMA, beta=BETA, tau=TAU,
     return env
 
 
-def rate(rating_groups, ranks=None, weights=None, min_delta=DELTA):
+def rate(rating_groups, ranks=None, weights=None, min_delta=DELTA, partial_weights=None):
     """A proxy function for :meth:`TrueSkill.rate` of the global environment.
 
     .. versionadded:: 0.2
 
     """
-    return global_env().rate(rating_groups, ranks, weights, min_delta)
+    rating_groups_after = global_env().rate(rating_groups, ranks, weights, min_delta, partial_weights)
+
+    if not partial_weights:
+        partial_weights = [tuple([1 for _ in group]) for group in rating_groups]
+
+    rating_groups_partial = [
+        # partial = old + a(new - old)
+        tuple([Rating(mu=(rating.mu - rating_weight*(rating.mu - rating_updated.mu)),
+                      sigma=(rating.sigma - rating_weight*(rating.sigma - rating_updated.sigma)))]
+                for rating, rating_updated, rating_weight in zip(rating_group, rating_group_updated, group_weights)
+             ) 
+        for rating_group, rating_group_updated, group_weights 
+            in zip(rating_groups, rating_groups_after, partial_weights)
+    ]
+
+    return rating_groups_partial
 
 
 def quality(rating_groups, weights=None):
